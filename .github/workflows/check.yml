@@ -13,25 +13,21 @@ on:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
       - name: Install deps
-        run: pip install requests
+        run: python3 -m pip install --quiet requests
 
       - name: Check for new notices
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SEND_TEST: ${{ github.event.inputs.send_test || 'false' }}
-        run: python checker.py
+        run: python3 checker.py
 
       - name: Persist state
         run: |
