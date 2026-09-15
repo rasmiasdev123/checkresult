@@ -1,0 +1,21 @@
+[Unit]
+Description=Odisha Postal Notice Bot (checks every 5 min, sends new PDFs to Telegram)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/checkresult
+# Token lives in /home/ubuntu/checkresult/.env (NOT in git):
+#   TELEGRAM_BOT_TOKEN=xxx
+#   TELEGRAM_CHAT_ID=1912867429
+#   RUN_LOOP=1
+#   LOOP_MINUTES=5
+EnvironmentFile=/home/ubuntu/checkresult/.env
+ExecStart=/usr/bin/python3 /home/ubuntu/checkresult/checker.py
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

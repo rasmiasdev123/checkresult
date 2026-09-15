@@ -348,5 +348,32 @@ def main() -> int:
     return 0
 
 
+def _load_dotenv():
+    """Load KEY=VALUE from .env next to this script (EC2 service mode)."""
+    env_path = Path(__file__).parent / ".env"
+    if not env_path.exists():
+        return
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        k = k.strip()
+        v = v.strip().strip("'").strip('"')
+        if k and k not in os.environ:
+            os.environ[k] = v
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    _load_dotenv()
+    if os.getenv("RUN_LOOP", "").lower() in ("1", "true", "yes"):
+        mins = float(os.getenv("LOOP_MINUTES", "5"))
+        print(f"RUN_LOOP=1 — checking every {mins} min.", flush=True)
+        while True:
+            try:
+                main()
+            except Exception as e:
+                print(f"Loop iteration failed: {e}", flush=True)
+            time.sleep(mins * 60)
+    else:
+        sys.exit(main())
