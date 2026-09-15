@@ -20,7 +20,11 @@ import html as htmlmod
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
+import time
+
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 PAGE_URL = "https://app.indiapost.gov.in/circleportal/odisha"
 BASE = "https://app.indiapost.gov.in"
@@ -29,17 +33,42 @@ STATE_FILE = Path(__file__).parent / "state.json"
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                   "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-    "Accept": "text/html,application/xhtml+xml",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
+    "Cache-Control": "no-cache",
+    "Upgrade-Insecure-Requests": "1",
 }
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
 
+def _session() -> requests.Session:
+    s = requests.Session()
+    retry = Retry(
+        total=3, connect=3, read=3, status=3,
+        backoff_factor=5,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=("GET", "POST"),
+    )
+    s.mount("https://", HTTPAdapter(max_retries=retry))
+    s.mount("http://", HTTPAdapter(max_retries=retry))
+    return s
+
+
 def fetch_page() -> str:
-    r = requests.get(PAGE_URL, headers=HEADERS, timeout=30)
-    r.raise_for_status()
-    return r.text
+    last_err = None
+    for attempt in range(1, 5):
+        try:
+            print(f"Fetch attempt {attempt}/4 ...", flush=True)
+            r = _session().get(PAGE_URL, headers=HEADERS, timeout=(15, 90))
+            r.raise_for_status()
+            return r.text
+        except Exception as e:
+            last_err = e
+            print(f"Attempt {attempt} failed: {e}", flush=True)
+            if attempt < 4:
+                time.sleep(10 * attempt)
+    raise last_err
 
 
 def clean_text(raw_html: str) -> str:
@@ -203,7 +232,7 @@ def main() -> int:
     if first_run and not send_test:
         latest = notices[0]
         print(f"First run — sending latest as proof: {latest['title'][:80]}", flush=True)
-        pdf = requests.get(latest["url"], headers=HEADERS, timeout=90).content
+        pdf = _session().get(latest["url"], headers=HEADERS, timeout=(15, 120)).content
         send_document(token, chat_id, pdf,
                       safe_filename(latest["title"], latest["id"]),
                       caption_for(latest, "✅ <b>Bot working! Latest notice:</b>"))
@@ -214,7 +243,7 @@ def main() -> int:
     if send_test:
         latest = notices[0]
         print(f"SEND_TEST — sending latest: {latest['title'][:80]}", flush=True)
-        pdf = requests.get(latest["url"], headers=HEADERS, timeout=90).content
+        pdf = _session().get(latest["url"], headers=HEADERS, timeout=(15, 120)).content
         if len(pdf) > 45 * 1024 * 1024:
             send_message(token, chat_id,
                          f"✅ <b>Bot working! Latest notice (PDF too big, link only):</b>\n\n"
@@ -240,7 +269,7 @@ def main() -> int:
     for n in fresh:
         try:
             print(f"Sending: {n['title'][:80]}", flush=True)
-            resp = requests.get(n["url"], headers=HEADERS, timeout=90)
+            resp = _session().get(n["url"], headers=HEADERS, timeout=(15, 120))
             resp.raise_for_status()
             pdf = resp.content
             if len(pdf) < 1024 or len(pdf) > 45 * 1024 * 1024:
