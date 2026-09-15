@@ -55,20 +55,65 @@ def _session() -> requests.Session:
     return s
 
 
+def _page_candidates():
+    from urllib.parse import quote
+    enc = quote(PAGE_URL, safe="")
+    return [
+        ("direct", PAGE_URL),
+        ("allorigins", "https://api.allorigins.win/raw?url=" + enc),
+        ("codetabs", "https://api.codetabs.com/v1/proxy?quest=" + enc),
+        ("corsproxy", "https://corsproxy.io/?url=" + enc),
+        ("jina", "https://localhost:3000/" + PAGE_URL),
+    ]
+
+
+def _looks_like_page(text: str) -> bool:
+    return ("updatesList" in text) or ("/api/documents/file/" in text)
+
+
 def fetch_page() -> str:
     last_err = None
-    for attempt in range(1, 5):
+    for name, url in _page_candidates():
+        for attempt in range(1, 3):
+            try:
+                print(f"Fetch via {name} attempt {attempt}/2 ...", flush=True)
+                r = _session().get(url, headers=HEADERS, timeout=(30, 120))
+                r.raise_for_status()
+                text = r.text
+                if _looks_like_page(text):
+                    print(f"OK via {name} ({len(text)} chars)", flush=True)
+                    return text
+                print(f"{name} returned {len(text)} chars but no notices, retrying...", flush=True)
+            except Exception as e:
+                last_err = e
+                print(f"{name} attempt {attempt} failed: {str(e)[:200]}", flush=True)
+                time.sleep(5 * attempt)
+    raise last_err or RuntimeError("all fetch routes failed")
+
+
+def download_pdf(pdf_url: str) -> bytes:
+    from urllib.parse import quote
+    cands = [
+        ("direct", pdf_url),
+        ("allorigins", "https://api.allorigins.win/raw?url=" + quote(pdf_url, safe="")),
+        ("codetabs", "https://api.codetabs.com/v1/proxy?quest=" + quote(pdf_url, safe="")),
+        ("corsproxy", "https://corsproxy.io/?url=" + quote(pdf_url, safe="")),
+    ]
+    last_err = None
+    for name, url in cands:
         try:
-            print(f"Fetch attempt {attempt}/4 ...", flush=True)
-            r = _session().get(PAGE_URL, headers=HEADERS, timeout=(30, 120))
-            r.raise_for_status()
-            return r.text
+            print(f"PDF via {name} ...", flush=True)
+            resp = _session().get(url, headers=HEADERS, timeout=(30, 180))
+            resp.raise_for_status()
+            data = resp.content
+            if data[:5] == b"%PDF-":
+                print(f"PDF OK via {name} ({len(data)} bytes)", flush=True)
+                return data
+            print(f"{name} did not return PDF (got {len(data)} bytes), trying next...", flush=True)
         except Exception as e:
             last_err = e
-            print(f"Attempt {attempt} failed: {e}", flush=True)
-            if attempt < 4:
-                time.sleep(10 * attempt)
-    raise last_err
+            print(f"PDF via {name} failed: {str(e)[:200]}", flush=True)
+    raise last_err or RuntimeError("all PDF routes failed")
 
 
 def clean_text(raw_html: str) -> str:
@@ -131,6 +176,24 @@ def parse_notices(html_text: str) -> list:
         except Exception:
             title = raw_title
         add(file_id, url, title, date=date, size=size)
+
+    # --- Method C: bare URLs (proxy/markdown fallback, e.g. Jina reader) ---
+    # Matches markdown links [title](.../file/xxx) or raw .../file/xxx occurrences.
+    if not notices:
+        md_pat = re.compile(
+            r'\[([^\]]{10,300})\]\((?:https?://app\.indiapost\.gov\.in)?(/circleportal/api/documents/file/([A-Za-z0-9]+))\)'
+        )
+        for m in md_pat.finditer(html_text):
+            title, url, file_id = m.group(1), m.group(2), m.group(3)
+            add(file_id, url, clean_text(title))
+    if not notices:
+        for m in re.finditer(r'/circleportal/api/documents/file/([A-Za-z0-9]+)', html_text):
+            file_id = m.group(1)
+            # grab ~120 chars before as pseudo-title
+            start = max(0, m.start() - 200)
+            snippet = clean_text(html_text[start:m.start()])[-150:]
+            add(file_id, "/circleportal/api/documents/file/" + file_id,
+                snippet or f"Notice {file_id[:8]}")
 
     return notices
 
@@ -232,7 +295,7 @@ def main() -> int:
     if first_run and not send_test:
         latest = notices[0]
         print(f"First run — sending latest as proof: {latest['title'][:80]}", flush=True)
-        pdf = _session().get(latest["url"], headers=HEADERS, timeout=(15, 120)).content
+        pdf = download_pdf(latest["url"])
         send_document(token, chat_id, pdf,
                       safe_filename(latest["title"], latest["id"]),
                       caption_for(latest, "✅ <b>Bot working! Latest notice:</b>"))
@@ -243,7 +306,7 @@ def main() -> int:
     if send_test:
         latest = notices[0]
         print(f"SEND_TEST — sending latest: {latest['title'][:80]}", flush=True)
-        pdf = _session().get(latest["url"], headers=HEADERS, timeout=(15, 120)).content
+        pdf = download_pdf(latest["url"])
         if len(pdf) > 45 * 1024 * 1024:
             send_message(token, chat_id,
                          f"✅ <b>Bot working! Latest notice (PDF too big, link only):</b>\n\n"
@@ -269,9 +332,7 @@ def main() -> int:
     for n in fresh:
         try:
             print(f"Sending: {n['title'][:80]}", flush=True)
-            resp = _session().get(n["url"], headers=HEADERS, timeout=(15, 120))
-            resp.raise_for_status()
-            pdf = resp.content
+            pdf = download_pdf(n["url"])
             if len(pdf) < 1024 or len(pdf) > 45 * 1024 * 1024:
                 raise ValueError(f"Bad PDF size {len(pdf)} bytes, sending link only")
             send_document(token, chat_id, pdf,
