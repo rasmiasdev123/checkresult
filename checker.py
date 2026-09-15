@@ -60,7 +60,7 @@ def fetch_page() -> str:
     for attempt in range(1, 5):
         try:
             print(f"Fetch attempt {attempt}/4 ...", flush=True)
-            r = _session().get(PAGE_URL, headers=HEADERS, timeout=(15, 90))
+            r = _session().get(PAGE_URL, headers=HEADERS, timeout=(30, 120))
             r.raise_for_status()
             return r.text
         except Exception as e:
