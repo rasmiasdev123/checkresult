@@ -26,13 +26,6 @@ jobs:
       - name: Install deps
         run: pip install requests
 
-      - name: Debug connectivity
-        run: |
-          echo "=== runner ==="; curl -s --max-time 15 https://ipinfo.io/json || true
-          echo "=== google (should work) ==="; curl -o /dev/null -s -w "google http:%{http_code} time:%{time_total}s\n" --max-time 20 https://www.google.com || true
-          echo "=== DNS ==="; nslookup app.indiapost.gov.in || true
-          echo "=== target ==="; curl -o /dev/null -s -w "target http:%{http_code} time:%{time_total}s\n" --max-time 40 -A "Mozilla/5.0" https://app.indiapost.gov.in/circleportal/odisha || echo "TARGET CURL FAILED exit=$?"
-
       - name: Check for new notices
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
