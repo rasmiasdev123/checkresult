@@ -12,6 +12,9 @@ WorkingDirectory=/home/ubuntu/checkresult
 #   TELEGRAM_CHAT_ID=1912867429
 #   RUN_LOOP=1
 #   LOOP_MINUTES=5
+# Optional result focus:
+#   KEYWORDS=result,ldce,merit,select list
+#   RESULT_ONLY=1   (send only keyword matches)
 EnvironmentFile=/home/ubuntu/checkresult/.env
 ExecStart=/usr/bin/python3 /home/ubuntu/checkresult/checker.py
 Restart=always
